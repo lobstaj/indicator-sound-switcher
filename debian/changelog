@@ -1,3 +1,11 @@
+indicator-sound-switcher (2.3.9-mandelbrot-1) jammy; urgency=low
+
+  * Mandelbrot-specific additions
+  	* immutable-default-ports config flag
+  	* configurable custom switch command
+
+ -- Jorge Da Lobsta <jorg@ml1.net>  Tue, 24 Jun 2023 12:31:33 +0300
+
 indicator-sound-switcher (2.3.9-1) jammy; urgency=low
 
   * Configuration prune button in Preferences (#120)
