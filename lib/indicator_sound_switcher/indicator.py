@@ -90,9 +90,10 @@ class SoundSwitcherIndicator(GObject.GObject):
         self.item_separator_outputs = None
 
         # Load configuration, if any
-        self.config_file_name = os.path.join(GLib.get_user_config_dir(), APP_ID + '.json')
-        self.config           = self.config_load()
-        self.config_devices   = self.config['devices']
+        self.config_file_name        = os.path.join(GLib.get_user_config_dir(), APP_ID + '.json')
+        self.config                  = self.config_load()
+        self.config_devices          = self.config['devices']
+        self.immutable_default_ports = bool(self.config['immutable_default_ports', False])
 
         # Initialise the keyboard manager
         self.keyboard_manager = KeyboardManager(self.on_port_keyboard_shortcut)
@@ -220,7 +221,7 @@ class SoundSwitcherIndicator(GObject.GObject):
 
     def on_select_port(self, widget, data):
         """Signal handler: port selection item clicked."""
-        if widget.get_active():
+        if self.immutable_default_ports or widget.get_active():
             self.activate_port(*data)
 
     def on_port_keyboard_shortcut(self, shortcut, data: list):
@@ -416,10 +417,14 @@ class SoundSwitcherIndicator(GObject.GObject):
                 sep_item = self.item_separator_outputs if port.is_output else self.item_separator_inputs
                 if hdr_item is not None and sep_item is not None:
                     # Create a menu item and save it in the port object
-                    port.menu_item = self.menu_insert_ordered_item(
+                    menu_item = self.menu_insert_ordered_item(
                         hdr_item, sep_item, port.get_menu_item_title(), port.is_available or port.always_avail)
                     # Bind a click handler
-                    port.handler_id = port.menu_item.connect('activate', self.on_select_port, (card.index, port.name))
+                    port.handler_id = menu_item.connect('activate', self.on_select_port, (card.index, port.name))
+
+                    # Save the menu item in the port object if we want the port to change its active state
+                    if not self.immutable_default_ports:
+                        port.menu_item = menu_item
 
     def card_info(self, data):
         """Register a new Card instance or updates an existing one."""
@@ -898,11 +903,12 @@ class SoundSwitcherIndicator(GObject.GObject):
 
         # Switching output
         if is_output:
-            # Change the default sink
-            self.synchronise_op(
-                'pa_context_set_default_sink()',
-                pa_context_set_default_sink(self.pa_context, stream.name.encode(), self._pacb_context_success, None)
-            )
+            if not self.immutable_default_ports:
+                # Change the default sink
+                self.synchronise_op(
+                    'pa_context_set_default_sink()',
+                    pa_context_set_default_sink(self.pa_context, stream.name.encode(), self._pacb_context_success, None)
+                )
 
             # Change the active port, if it's not a dummy one
             if port is not None and not port.is_dummy:
@@ -918,11 +924,12 @@ class SoundSwitcherIndicator(GObject.GObject):
 
         # Switching input
         else:
-            # Change the default source
-            self.synchronise_op(
-                'pa_context_set_default_source()',
-                pa_context_set_default_source(
-                    self.pa_context, stream.name.encode(), self._pacb_context_success, None))
+            if not self.immutable_default_ports:
+                # Change the default source
+                self.synchronise_op(
+                    'pa_context_set_default_source()',
+                    pa_context_set_default_source(
+                        self.pa_context, stream.name.encode(), self._pacb_context_success, None))
 
             # Change the active port, if it's not a dummy one
             if port is not None and not port.is_dummy:
@@ -1010,11 +1017,14 @@ class SoundSwitcherIndicator(GObject.GObject):
         idx_from = 0 if after_item is None else items.index(after_item) + 1
         idx_to   = items.index(before_item)
 
-        # If there's at least one item, get the group from it
-        group = [] if idx_to == idx_from else items[idx_from].get_group()
+        if self.immutable_default_ports:
+            new_item = Gtk.MenuItem.new_with_mnemonic(label)
+        else:
+            # If there's at least one item, get the group from it
+            group = [] if idx_to == idx_from else items[idx_from].get_group()
+            # Create and set up a new radio item
+            new_item = Gtk.RadioMenuItem.new_with_mnemonic(group, label)
 
-        # Create and set up a new radio item
-        new_item = Gtk.RadioMenuItem.new_with_mnemonic(group, label)
         if show:
             new_item.show()
 
