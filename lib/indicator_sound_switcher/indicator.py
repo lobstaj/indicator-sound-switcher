@@ -94,6 +94,7 @@ class SoundSwitcherIndicator(GObject.GObject):
         self.config                  = self.config_load()
         self.config_devices          = self.config['devices']
         self.immutable_default_ports = bool(self.config['immutable_default_ports', False])
+        self.custom_switch_cmd       = str(self.config['custom_switch_cmd', '']).strip()
 
         # Initialise the keyboard manager
         self.keyboard_manager = KeyboardManager(self.on_port_keyboard_shortcut)
@@ -903,11 +904,13 @@ class SoundSwitcherIndicator(GObject.GObject):
 
         # Switching output
         if is_output:
+            sink_name = stream.name.encode()
+
             if not self.immutable_default_ports:
                 # Change the default sink
                 self.synchronise_op(
                     'pa_context_set_default_sink()',
-                    pa_context_set_default_sink(self.pa_context, stream.name.encode(), self._pacb_context_success, None)
+                    pa_context_set_default_sink(self.pa_context, sink_name, self._pacb_context_success, None)
                 )
 
             # Change the active port, if it's not a dummy one
@@ -922,14 +925,19 @@ class SoundSwitcherIndicator(GObject.GObject):
                     pa_context_move_sink_input_by_index(
                         self.pa_context, idx, stream.index, self._pacb_context_success, None))
 
+            # Run custom switch command
+            self.run_custom_switch_cmd('SINK', str(sink_name, "utf8"))
+
         # Switching input
         else:
+            source_name = stream.name.encode()
+
             if not self.immutable_default_ports:
                 # Change the default source
                 self.synchronise_op(
                     'pa_context_set_default_source()',
                     pa_context_set_default_source(
-                        self.pa_context, stream.name.encode(), self._pacb_context_success, None))
+                        self.pa_context, source_name, self._pacb_context_success, None))
 
             # Change the active port, if it's not a dummy one
             if port is not None and not port.is_dummy:
@@ -944,6 +952,9 @@ class SoundSwitcherIndicator(GObject.GObject):
                     'pa_context_move_source_output_by_index()',
                     pa_context_move_source_output_by_index(
                         self.pa_context, idx, stream.index, self._pacb_context_success, None))
+
+            # Run custom switch command
+            self.run_custom_switch_cmd('SOURCE', str(source_name, "utf8"))
 
     def activate_sink(self, name: str):
         """Activate a sink by its name."""
@@ -974,6 +985,16 @@ class SoundSwitcherIndicator(GObject.GObject):
         # Card not found
         logging.warning('Failed to find card `%s` among the available devices', card_name)
         return None, None
+
+    def run_custom_switch_cmd(self, port_type, port_name):
+        if len(self.custom_switch_cmd) > 0:
+            cmd = self.custom_switch_cmd \
+                    .replace("$PORT_TYPE", port_type) \
+                    .replace("$PORT_NAME", "\"{}\"".format(port_name))
+            logging.debug('  * Running command: `%s`', cmd)
+            exit_status = os.system(cmd)
+            if exit_status != 0:
+                logging.debug('  * Command returned status: %d', exit_status)
 
     @staticmethod
     def run():
